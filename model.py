@@ -1,4 +1,5 @@
 """Implement HuggingfaceModel models."""
+
 import copy
 import logging
 from collections import Counter
@@ -21,7 +22,7 @@ import re
 from dataclasses import dataclass
 import numpy as np
 
-STOP_SEQUENCES = ['\n\n\n\n', '\n\n\n', '\n\n', '\n', 'Question:', 'Context:']
+STOP_SEQUENCES = ["\n\n\n\n", "\n\n\n", "\n\n", "\n", "Question:", "Context:"]
 
 
 class BaseModel(ABC):
@@ -36,32 +37,39 @@ class BaseModel(ABC):
     def get_p_true(self, input_data):
         pass
 
+
 class StoppingCriteriaSub(StoppingCriteria):
     """Stop generations when they match a particular text or token."""
-    def __init__(self, stops, tokenizer, match_on='text', initial_length=None):
+
+    def __init__(self, stops, tokenizer, match_on="text", initial_length=None):
         super().__init__()
         self.stops = stops
         self.initial_length = initial_length
         self.tokenizer = tokenizer
         self.match_on = match_on
-        if self.match_on == 'tokens':
-            self.stops = [torch.tensor(self.tokenizer.encode(i)).to('cuda') for i in self.stops]
+        if self.match_on == "tokens":
+            self.stops = [
+                torch.tensor(self.tokenizer.encode(i)).to("cuda") for i in self.stops
+            ]
             print(self.stops)
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         del scores  # `scores` arg is required by StoppingCriteria but unused by us.
         for stop in self.stops:
-            if self.match_on == 'text':
-                generation = self.tokenizer.decode(input_ids[0][self.initial_length:], skip_special_tokens=False)
+            if self.match_on == "text":
+                generation = self.tokenizer.decode(
+                    input_ids[0][self.initial_length :], skip_special_tokens=False
+                )
                 match = stop in generation
-            elif self.match_on == 'tokens':
+            elif self.match_on == "tokens":
                 # Can be dangerous due to tokenizer ambiguities.
                 match = stop in input_ids[0][-len(stop):]
             else:
-                raise
+                raise ValueError("Invalid match_on value")
             if match:
                 return True
         return False
+
 
 def remove_split_layer(device_map_in):
     """Modify device maps s.t. individual layers are not spread across devices."""
@@ -69,7 +77,7 @@ def remove_split_layer(device_map_in):
     device_map = copy.deepcopy(device_map_in)
     destinations = list(device_map.keys())
 
-    counts = Counter(['.'.join(i.split('.')[:2]) for i in destinations])
+    counts = Counter([".".join(i.split(".")[:2]) for i in destinations])
 
     found_split = False
     for layer, count in counts.items():
@@ -79,18 +87,19 @@ def remove_split_layer(device_map_in):
         if found_split:
             # Only triggers if we find more than one split layer.
             raise ValueError(
-                'More than one split layer.\n'
-                f'Currently at layer {layer}.\n'
-                f'In map: {device_map_in}\n'
-                f'Out map: {device_map}\n')
+                "More than one split layer.\n"
+                f"Currently at layer {layer}.\n"
+                f"In map: {device_map_in}\n"
+                f"Out map: {device_map}\n"
+            )
 
-        logging.info(f'Split layer is {layer}.')
+        logging.info(f"Split layer is {layer}.")
 
         device = None
         # Remove split for that layer.
         for name in list(device_map.keys()):
             if name.startswith(layer):
-                print(f'pop {name}')
+                print(f"pop {name}")
                 device = device_map.pop(name)
 
         if device is not None:
@@ -105,7 +114,7 @@ class HuggingfaceModel(BaseModel):
 
     def __init__(self, model_name, stop_sequences=None, max_new_tokens=None):
         if max_new_tokens is None:
-            raise
+            raise ValueError("max_new_tokens must be specified")
         self.max_new_tokens = max_new_tokens
         self.model_name = model_name
 
@@ -122,34 +131,46 @@ class HuggingfaceModel(BaseModel):
             self.model_type = "mistral"
             self.init_mistral()
         else:
-            raise ValueError(f'Unknown model_type `{self.model_type}`.')
-        if stop_sequences == 'default':
+            raise ValueError(f"Unknown model_type `{self.model_type}`.")
+        if stop_sequences == "default":
             stop_sequences = STOP_SEQUENCES
         self.stop_sequences = stop_sequences + [self.tokenizer.eos_token]
-        self.token_limit = 4096 if 'llama-2' in self.model_name.lower() else 2048
+        self.token_limit = 4096 if "llama-2" in self.model_name.lower() else 2048
 
     def init_llama(self):
         kwargs = {}
         eightbit = False
-        if self.model_name.lower().endswith('-8bit'):
-            kwargs = {'quantization_config': BitsAndBytesConfig(
-                load_in_8bit=True,)}
-            self.model_name = self.model_name[:-len('-8bit')]
+        if self.model_name.lower().endswith("-8bit"):
+            kwargs = {
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_8bit=True,
+                )
+            }
+            self.model_name = self.model_name[: -len("-8bit")]
             eightbit = True
 
         self.tokenizer = AutoTokenizer.from_pretrained(
-            f"{self.model_name}", device_map="auto",
-            token_type_ids=None)
+            f"{self.model_name}", device_map="auto", token_type_ids=None
+        )
 
-        if ('1b' in self.model_name.lower() or '3b' in self.model_name.lower() or '7b' in self.model_name.lower() or '8b' in self.model_name.lower() or '13b' in self.model_name.lower()) or eightbit:
+        if (
+            "1b" in self.model_name.lower()
+            or "3b" in self.model_name.lower()
+            or "7b" in self.model_name.lower()
+            or "8b" in self.model_name.lower()
+            or "13b" in self.model_name.lower()
+        ) or eightbit:
             self.model = AutoModelForCausalLM.from_pretrained(
-                f"{self.model_name}", device_map="auto",
-                max_memory={0: '80GIB'}, **kwargs,)
-        elif ('65b' in self.model_name.lower() or '70b' in self.model_name.lower()):
+                f"{self.model_name}",
+                device_map="auto",
+                max_memory={0: "80GIB"},
+                **kwargs,
+            )
+        elif "65b" in self.model_name.lower() or "70b" in self.model_name.lower():
             path = snapshot_download(
-                repo_id=f'{self.model_name}',
-                allow_patterns=['*.json', '*.model', '*.safetensors'],
-                ignore_patterns=['pytorch_model.bin.index.json']
+                repo_id=f"{self.model_name}",
+                allow_patterns=["*.json", "*.model", "*.safetensors"],
+                ignore_patterns=["pytorch_model.bin.index.json"],
             )
             config = AutoConfig.from_pretrained(f"{self.model_name}")
             with accelerate.init_empty_weights():
@@ -158,87 +179,113 @@ class HuggingfaceModel(BaseModel):
             max_mem = 15 * 4686198491
 
             device_map = accelerate.infer_auto_device_map(
-                self.model.model,
-                max_memory={0: max_mem, 1: max_mem},
-                dtype='float16'
+                self.model.model, max_memory={0: max_mem, 1: max_mem}, dtype="float16"
             )
             device_map = remove_split_layer(device_map)
             full_model_device_map = {f"model.{k}": v for k, v in device_map.items()}
             full_model_device_map["lm_head"] = 0
 
             self.model = accelerate.load_checkpoint_and_dispatch(
-                self.model, path, device_map=full_model_device_map,
-                dtype='float16', skip_keys='past_key_values')
+                self.model,
+                path,
+                device_map=full_model_device_map,
+                dtype="float16",
+                skip_keys="past_key_values",
+            )
         else:
             raise ValueError
 
     def init_mistral(self):
-        if self.model_name.endswith('-8bit'):
-            kwargs = {'quantization_config': BitsAndBytesConfig(
-                load_in_8bit=True,)}
-            self.model_name = self.model_name[:-len('-8bit')]
-        if self.model_name.endswith('-4bit'):
-            kwargs = {'quantization_config': BitsAndBytesConfig(
-                load_in_4bit=True,)}
-            self.model_name = self.model_name[:-len('-4bit')]
+        if self.model_name.endswith("-8bit"):
+            kwargs = {
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_8bit=True,
+                )
+            }
+            self.model_name = self.model_name[: -len("-8bit")]
+        if self.model_name.endswith("-4bit"):
+            kwargs = {
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_4bit=True,
+                )
+            }
+            self.model_name = self.model_name[: -len("-4bit")]
         else:
             kwargs = {}
 
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, device_map='auto', token_type_ids=None,
-            clean_up_tokenization_spaces=False)
+            self.model_name,
+            device_map="auto",
+            token_type_ids=None,
+            clean_up_tokenization_spaces=False,
+        )
 
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            device_map='auto',
-            max_memory={0: '80GIB'},
+            device_map="auto",
+            max_memory={0: "80GIB"},
             **kwargs,
         )
 
     def init_falcon(self):
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, device_map='auto', token_type_ids=None,
-            clean_up_tokenization_spaces=False)
+            self.model_name,
+            device_map="auto",
+            token_type_ids=None,
+            clean_up_tokenization_spaces=False,
+        )
 
-        kwargs = {'quantization_config': BitsAndBytesConfig(
-            load_in_8bit=True,)}
+        kwargs = {
+            "quantization_config": BitsAndBytesConfig(
+                load_in_8bit=True,
+            )
+        }
 
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             trust_remote_code=True,
-            device_map='auto',
+            device_map="auto",
             **kwargs,
         )
 
     # TODO: add speculative decoding
-    def speculative_predict(self, input_data, temperature,
-                            draft_model=None, return_full=False):
+    def speculative_predict(
+        self, input_data, temperature, draft_model=None, return_full=False
+    ):
         if draft_model is None:
             draft_model = self.model
         return self.predict(input_data, temperature, return_full=return_full)
-
 
     def predict(self, input_data, temperature, return_full=False):
 
         # Implement prediction.
         inputs = self.tokenizer(input_data, return_tensors="pt").to("cuda")
 
-        if 'llama' in self.model_name.lower() or 'falcon' in self.model_name.lower() or 'mistral' in self.model_name.lower():
-            if 'token_type_ids' in inputs:  # Some HF models have changed.
-                del inputs['token_type_ids']
+        if (
+            "llama" in self.model_name.lower()
+            or "falcon" in self.model_name.lower()
+            or "mistral" in self.model_name.lower()
+        ):
+            if "token_type_ids" in inputs:  # Some HF models have changed.
+                del inputs["token_type_ids"]
             pad_token_id = self.tokenizer.eos_token_id
         else:
             pad_token_id = None
 
         if self.stop_sequences is not None:
-            stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(
-                stops=self.stop_sequences,
-                initial_length=len(inputs['input_ids'][0]),
-                tokenizer=self.tokenizer)])
+            stopping_criteria = StoppingCriteriaList(
+                [
+                    StoppingCriteriaSub(
+                        stops=self.stop_sequences,
+                        initial_length=len(inputs["input_ids"][0]),
+                        tokenizer=self.tokenizer,
+                    )
+                ]
+            )
         else:
             stopping_criteria = None
 
-        logging.debug('temperature: %f', temperature)
+        logging.debug("temperature: %f", temperature)
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -254,13 +301,17 @@ class HuggingfaceModel(BaseModel):
 
         if len(outputs.sequences[0]) > self.token_limit:
             raise ValueError(
-                'Generation exceeding token limit %d > %d',
-                len(outputs.sequences[0]), self.token_limit)
+                "Generation exceeding token limit %d > %d",
+                len(outputs.sequences[0]),
+                self.token_limit,
+            )
 
         full_answer = self.tokenizer.decode(
-            outputs.sequences[0], skip_special_tokens=True)
+            outputs.sequences[0], skip_special_tokens=True
+        )
         input_data = self.tokenizer.decode(
-            inputs['input_ids'][0], skip_special_tokens=True)
+            inputs["input_ids"][0], skip_special_tokens=True
+        )
 
         if return_full:
             return full_answer
@@ -272,8 +323,8 @@ class HuggingfaceModel(BaseModel):
             print("Full answer: ", full_answer)
             print("Length of full_answer: ", len(outputs.sequences[0]))
             print("Input data: ", input_data)
-            print("Length of input_data: ", len(inputs['input_ids'][0]))
-            print("input indices: ", inputs['input_ids'][0])
+            print("Length of input_data: ", len(inputs["input_ids"][0]))
+            print("input indices: ", inputs["input_ids"][0])
             print("answer indices: ", outputs.sequences[0])
 
             input_data_offset = 0
@@ -308,12 +359,16 @@ class HuggingfaceModel(BaseModel):
         # Note: It's important we do this with full answer, since there might be
         # non-trivial interactions between the input_data and generated part
         # in tokenization (particularly around whitespaces.)
-        token_stop_index = self.tokenizer(full_answer[:input_data_offset + stop_at], return_tensors="pt")['input_ids'].shape[1]
-        n_input_token = len(inputs['input_ids'][0])
+        token_stop_index = self.tokenizer(
+            full_answer[: input_data_offset + stop_at], return_tensors="pt"
+        )["input_ids"].shape[1]
+        n_input_token = len(inputs["input_ids"][0])
         n_generated = token_stop_index - n_input_token
 
         if n_generated == 0:
-            logging.warning('Only stop_words were generated. For likelihoods and embeddings, taking stop word instead.')
+            logging.warning(
+                "Only stop_words were generated. For likelihoods and embeddings, taking stop word instead."
+            )
             n_generated = 1
 
         # Get the last hidden state (last layer) and the last token's embedding of the answer.
@@ -330,31 +385,36 @@ class HuggingfaceModel(BaseModel):
         # We do not get embeddings for input_data! We thus subtract the n_tokens_in_input from
         # token_stop_index to arrive at the right output.
 
-        if 'decoder_hidden_states' in outputs.keys():
+        if "decoder_hidden_states" in outputs.keys():
             hidden = outputs.decoder_hidden_states
         else:
             hidden = outputs.hidden_states
 
         if len(hidden) == 1:
             logging.warning(
-                'Taking first and only generation for hidden! '
-                'n_generated: %d, n_input_token: %d, token_stop_index %d, '
-                'last_token: %s, generation was: %s',
-                n_generated, n_input_token, token_stop_index,
-                self.tokenizer.decode(outputs['sequences'][0][-1]),
+                "Taking first and only generation for hidden! "
+                "n_generated: %d, n_input_token: %d, token_stop_index %d, "
+                "last_token: %s, generation was: %s",
+                n_generated,
+                n_input_token,
+                token_stop_index,
+                self.tokenizer.decode(outputs["sequences"][0][-1]),
                 full_answer,
-                )
+            )
             last_input = hidden[0]
-        elif ((n_generated - 1) >= len(hidden)):
+        elif (n_generated - 1) >= len(hidden):
             # If access idx is larger/equal.
             logging.error(
-                'Taking last state because n_generated is too large'
-                'n_generated: %d, n_input_token: %d, token_stop_index %d, '
-                'last_token: %s, generation was: %s, slice_answer: %s',
-                n_generated, n_input_token, token_stop_index,
-                self.tokenizer.decode(outputs['sequences'][0][-1]),
-                full_answer, sliced_answer
-                )
+                "Taking last state because n_generated is too large"
+                "n_generated: %d, n_input_token: %d, token_stop_index %d, "
+                "last_token: %s, generation was: %s, slice_answer: %s",
+                n_generated,
+                n_input_token,
+                token_stop_index,
+                self.tokenizer.decode(outputs["sequences"][0][-1]),
+                full_answer,
+                sliced_answer,
+            )
             last_input = hidden[-1]
         else:
             last_input = hidden[n_generated - 1]
@@ -370,18 +430,19 @@ class HuggingfaceModel(BaseModel):
         # Each entry is shape (bs, vocabulary size).
         # outputs.sequences is the sequence of all tokens: input and generated.
         transition_scores = self.model.compute_transition_scores(
-            outputs.sequences, outputs.scores, normalize_logits=True)
+            outputs.sequences, outputs.scores, normalize_logits=True
+        )
         # Transition_scores[0] only contains the scores for the first generated tokens.
 
         log_likelihoods = [score.item() for score in transition_scores[0]]
         if len(log_likelihoods) == 1:
-            logging.warning('Taking first and only generation for log likelihood!')
+            logging.warning("Taking first and only generation for log likelihood!")
             log_likelihoods = log_likelihoods
         else:
             log_likelihoods = log_likelihoods[:n_generated]
 
         if len(log_likelihoods) == self.max_new_tokens:
-            logging.warning('Generation interrupted by max_token limit.')
+            logging.warning("Generation interrupted by max_token limit.")
 
         if len(log_likelihoods) == 0:
             raise ValueError
@@ -391,8 +452,10 @@ class HuggingfaceModel(BaseModel):
     def get_p_true(self, input_data):
         """Get the probability of the model anwering A (True) for the given input."""
 
-        input_data += ' A'
-        tokenized_prompt_true = self.tokenizer(input_data, return_tensors='pt').to('cuda')['input_ids']
+        input_data += " A"
+        tokenized_prompt_true = self.tokenizer(input_data, return_tensors="pt").to(
+            "cuda"
+        )["input_ids"]
         # The computation of the negative log likelihoods follows:
         # https://huggingface.co/docs/transformers/perplexity.
 
@@ -401,25 +464,29 @@ class HuggingfaceModel(BaseModel):
         target_ids_true[0, :-1] = -100
 
         with torch.no_grad():
-            model_output_true = self.model(tokenized_prompt_true, labels=target_ids_true)
+            model_output_true = self.model(
+                tokenized_prompt_true, labels=target_ids_true
+            )
 
         loss_true = model_output_true.loss
 
         return -loss_true.item()
+
 
 ### Entailment Model ###
 class BaseEntailment:
     def save_prediction_cache(self):
         pass
 
+
 ### Deberta-large (tuned on NLI datasets)
 class EntailmentDeberta(BaseEntailment):
-    def __init__(self,
-                 device="cuda"):
+    def __init__(self, device="cuda"):
         self.tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-base")
         self.device = device
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            "microsoft/deberta-v2-xlarge-mnli").to(self.device)
+            "microsoft/deberta-v2-xlarge-mnli"
+        ).to(self.device)
 
     def check_implication(self, text1, text2, *args, **kwargs):
         inputs = self.tokenizer(text1, text2, return_tensors="pt").to(self.device)
@@ -429,13 +496,16 @@ class EntailmentDeberta(BaseEntailment):
         outputs = self.model(**inputs)
         logits = outputs.logits
         # Deberta-mnli returns `neutral` and `entailment` classes at indices 1 and 2.
-        largest_index = torch.argmax(F.softmax(logits, dim=1))  # pylint: disable=no-member
+        largest_index = torch.argmax(
+            F.softmax(logits, dim=1)
+        )  # pylint: disable=no-member
         prediction = largest_index.cpu().item()
-        if os.environ.get('DEBERTA_FULL_LOG', False):
-            logging.info('Deberta Input: %s -> %s', text1, text2)
-            logging.info('Deberta Prediction: %s', prediction)
+        if os.environ.get("DEBERTA_FULL_LOG", False):
+            logging.info("Deberta Input: %s -> %s", text1, text2)
+            logging.info("Deberta Prediction: %s", prediction)
 
         return prediction
+
 
 ### Speculative Decoding ###
 ## Utils
@@ -525,22 +595,31 @@ def max_fn(x):
     x_max_sum = torch.sum(x_max, dim=1, keepdim=True)
     return x_max / x_max_sum
 
+
 import torch
 from typing import Optional
 
 # from .utils import norm_logits, sample
 from transformers.models.bloom.modeling_bloom import BloomForCausalLM
 
+
 def _debug_show_kvcache(past_key_values):
-    if  past_key_values is None:
+    if past_key_values is None:
         return
     for elem in past_key_values:
         k, v = elem
         print(f"kv cache: k shape {k.shape}, v shape {v.shape}")
         break
 
-class KVCacheModel():
-    def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> None:
+
+class KVCacheModel:
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        temperature: float = 1,
+        top_k: int = 0,
+        top_p: float = 0,
+    ) -> None:
         self._model = model
         self._past_key_values = None
         self._prob_history = None
@@ -549,14 +628,21 @@ class KVCacheModel():
         self._top_k = top_k
         self._top_p = top_p
 
-    def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
+    def _forward_with_kvcache(
+        self, input_ids: torch.Tensor, use_debug=True
+    ) -> torch.Tensor:
         if self._past_key_values is None:
             assert self._prob_history is None, f"{self._prob_history.shape}"
             # the first forward (prefill) returns the prompt's logits
             outputs = self._model(input_ids)
             self._prob_history = outputs.logits
             for i in range(self._prob_history.shape[-2]):
-                self._prob_history[:, i, :] = norm_logits(self._prob_history[:, i, :], self._temperature, self._top_k, self._top_p)
+                self._prob_history[:, i, :] = norm_logits(
+                    self._prob_history[:, i, :],
+                    self._temperature,
+                    self._top_k,
+                    self._top_p,
+                )
             self._past_key_values = outputs.past_key_values
             last_q = self._prob_history[:, -1, :]
         else:
@@ -574,14 +660,18 @@ class KVCacheModel():
                 print(f"last_input_id shape {last_input_id.shape}")
                 _debug_show_kvcache(self._past_key_values)
 
-            outputs = self._model(last_input_id, past_key_values=self._past_key_values, use_cache=True)
+            outputs = self._model(
+                last_input_id, past_key_values=self._past_key_values, use_cache=True
+            )
 
             not_cached_q = outputs.logits
             if not_cached_q.dim() == 2:
                 not_cached_q = torch.unsqueeze(not_cached_q, 0)
 
             for i in range(not_cached_q.shape[-2]):
-                not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)
+                not_cached_q[:, i, :] = norm_logits(
+                    not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p
+                )
 
             self._prob_history = torch.cat([self._prob_history, not_cached_q], dim=1)
 
@@ -590,11 +680,10 @@ class KVCacheModel():
 
         return last_q
 
-
-    def _generate_with_kvcache(self, prefix : torch.Tensor,
-                                    gamma : int,
-                                    use_debug = False) -> torch.Tensor:
-        """ forward the model gamma times
+    def _generate_with_kvcache(
+        self, prefix: torch.Tensor, gamma: int, use_debug=False
+    ) -> torch.Tensor:
+        """forward the model gamma times
 
         Args:
             prefix (torch.Tensor): the prefix
@@ -612,12 +701,12 @@ class KVCacheModel():
         return x
 
     @torch.no_grad()
-    def generate(self, input : torch.Tensor, gamma : int) -> torch.Tensor:
+    def generate(self, input: torch.Tensor, gamma: int) -> torch.Tensor:
         output = self._generate_with_kvcache(input, gamma)
         return output
 
     @torch.no_grad()
-    def rollback(self, end_pos : int):
+    def rollback(self, end_pos: int):
         past_key_values_trimmed = []
         assert self._past_key_values
         for kv in self._past_key_values:
@@ -642,10 +731,12 @@ class KVCacheModel():
         self._past_key_values = past_key_values_trimmed
         self._prob_history = self._prob_history[:, :end_pos, :]
 
+
 # from .huggingface_models import HuggingfaceModel
 import torch
+
 # from .kvcache_model import KVCacheModel
-# from .utils import sample, max_fn
+# from .utils import sample, max_fn
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import logging
@@ -1085,6 +1176,7 @@ class SpeculativeSamplingModel(HuggingfaceModel):
             logging.warning("Generation reached max_new_tokens limit")
 
         return sliced_answer, log_likelihoods, last_token_embedding
+
 
 ### COT Model ###
 @dataclass
@@ -1555,48 +1647,63 @@ class ChainOfThoughtModel(HuggingfaceModel):
             embedding = torch.zeros(self.model.config.hidden_size)
 
         return best_response, log_likelihoods, embedding
-    
+
+
 ### Load Models ###
 def init_model(model_name, model_max_new_tokens):
     mn = model_name
-    if 'llama' in mn.lower() or 'falcon' in mn or 'mistral' in mn.lower():
+    if "llama" in mn.lower() or "falcon" in mn or "mistral" in mn.lower():
         model = HuggingfaceModel(
-            mn, stop_sequences='default',
-            max_new_tokens=model_max_new_tokens)
+            mn, stop_sequences="default", max_new_tokens=model_max_new_tokens
+        )
     else:
-        raise ValueError(f'Unknown model_name `{mn}`.')
+        raise ValueError(f"Unknown model_name `{mn}`.")
     return model
+
 
 def init_speculative_model(target_model_name, approx_model_name, model_max_new_tokens):
     mn = target_model_name
-    if 'llama' in mn.lower() or 'falcon' in mn or 'mistral' in mn.lower():
+    if "llama" in mn.lower() or "falcon" in mn or "mistral" in mn.lower():
         model = SpeculativeSamplingModel(
             target_model_name=target_model_name,
             approx_model_name=approx_model_name,
-            stop_sequences='default',
-            max_new_tokens=model_max_new_tokens)
+            stop_sequences="default",
+            max_new_tokens=model_max_new_tokens,
+        )
     else:
-        raise ValueError(f'Unknown model_name `{mn}`.')
+        raise ValueError(f"Unknown model_name `{mn}`.")
     return model
 
+
 ### Get models ###
-MODEL_NAMES = ["meta-llama/Llama-3.2-1B", "meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.1-8B",
-               "meta-llama/Llama-3.1-70B"]
-def get_models(target_model_name,
-               draft_model_name=None,
-               model_max_new_tokens=20, quantize=False):
+MODEL_NAMES = [
+    "meta-llama/Llama-3.2-1B",
+    "meta-llama/Llama-3.2-3B",
+    "meta-llama/Llama-3.1-8B",
+    "meta-llama/Llama-3.1-70B",
+]
+
+
+def get_models(
+    target_model_name, draft_model_name=None, model_max_new_tokens=20, quantize=False
+):
     entailment_model = EntailmentDeberta()
-    assert target_model_name in MODEL_NAMES, f"correct your TGT[{target_model_name}] or DFT[{draft_model_name}]!"
+    assert (
+        target_model_name in MODEL_NAMES
+    ), f"correct your TGT[{target_model_name}] or DFT[{draft_model_name}]!"
     if quantize:
         target_model_name = target_model_name + "-8bit"
     if draft_model_name is None:
-        base_gen_model = init_model(model_name=target_model_name,
-                                    model_max_new_tokens=model_max_new_tokens)
+        base_gen_model = init_model(
+            model_name=target_model_name, model_max_new_tokens=model_max_new_tokens
+        )
     else:
         assert draft_model_name in MODEL_NAMES
         if quantize:
             draft_model_name = draft_model_name + "-8bit"
-        base_gen_model = init_speculative_model(target_model_name=target_model_name,
-                                                approx_model_name=draft_model_name,
-                                                model_max_new_tokens=model_max_new_tokens)
+        base_gen_model = init_speculative_model(
+            target_model_name=target_model_name,
+            approx_model_name=draft_model_name,
+            model_max_new_tokens=model_max_new_tokens,
+        )
     return base_gen_model, entailment_model

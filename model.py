@@ -135,7 +135,7 @@ class HuggingfaceModel(BaseModel):
         if stop_sequences == "default":
             stop_sequences = STOP_SEQUENCES
         self.stop_sequences = stop_sequences + [self.tokenizer.eos_token]
-        self.token_limit = 4096 if "llama-2" in self.model_name.lower() else 2048
+        self.token_limit = 4096 if "llama-2" in self.model_name.lower() else 32768
 
     def init_llama(self):
         kwargs = {}

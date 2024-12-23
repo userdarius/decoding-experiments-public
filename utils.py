@@ -5,19 +5,25 @@ import logging
 import argparse
 import pickle
 import wandb
+import random
 
-from evaluate import load
+from evaluate import load, evaluator
+
 
 BRIEF_PROMPTS = {
     "cot": "Let's think step by step: \n",
     "default": "Answer the following question as briefly as possible.\n",
     "chat": "Answer the following question in a single brief but complete sentence.\n",
     "summary": "Give a brief summary for the following paragraph.\n",
+    "xsum": "Summarize the following article in one sentence:\n",
 }
 
 
 def split_dataset(dataset):
     """Get indices of answerable and unanswerable questions."""
+    # For summarization tasks, all examples are considered answerable
+    if isinstance(dataset, list) and len(dataset) > 0 and "document" in dataset[0]:
+        return list(range(len(dataset))), []
 
     def clen(ex):
         return len(ex["answers"]["text"])
@@ -47,11 +53,17 @@ def construct_fewshot_prompt_from_indices(
         prompt = ""
 
     for example_index in example_indices:
-
         example = dataset[example_index]
-        context = example["context"]
-        question = example["question"]
-        answer = example["answers"]["text"][0]
+
+        # Handle summarization examples differently
+        if "document" in example:
+            context = example["document"]
+            question = None
+            answer = example["summary"]
+        else:
+            context = example["context"]
+            question = example["question"]
+            answer = example["answers"]["text"][0]
 
         prompt = prompt + make_prompt(context, question, answer, brief, brief_always)
 
@@ -69,6 +81,13 @@ def load_pkl(load_path):
 
 
 def get_reference(example):
+    # Handle summarization examples
+    if "summary" in example:
+        return {
+            "prediction_text": example["summary"],
+            "id": example["id"],
+        }
+
     if "answers" not in example:
         example = example["reference"]
     answers = example["answers"]
@@ -210,6 +229,23 @@ def get_metric(metric_name):
 
         return gsm8k_metric
 
+    elif metric_name == "xsum":
+        summarization_evaluator = evaluator("summarization")
+
+        def xsum_metric(predicted_answer, example, *args, **kwargs):
+            reference = get_reference(example)
+            results = summarization_evaluator.compute(
+                model_or_pipeline=lambda x: predicted_answer,
+                data={
+                    "text": example["document"],
+                    "summary": reference["prediction_text"],
+                },
+            )
+            # Consider a summary successful if it achieves at least 30 ROUGE-L score
+            return 1.0 if results["rouge"]["rougeL"] >= 30.0 else 0.0
+
+        return xsum_metric
+
     # Reuses the globally active model for these.
     elif metric_name == "llm":
         metric = llm_metric
@@ -229,22 +265,32 @@ def make_prompt(
 ):
     prompt = ""
     if cot:
-        prompt += f"Question: {question}\n"
+        if question:
+            prompt += f"Question: {question}\n"
+        else:
+            prompt += f"Document: {context}\n"
         prompt += BRIEF_PROMPTS["cot"]
         return prompt
+
     if brief_always:
         prompt += brief
-    if use_context and (context is not None):
-        prompt += f"Context: {context}\n"
-    prompt += f"Question: {question}\n"
-    if answer:
-        prompt += f"Answer: {answer}\n\n"
-    else:
-        prompt += "Answer:"
+
+    if question is None:  # Summarization case
+        prompt += f"Article: {context}\n"
+        if answer:
+            prompt += f"Summary: {answer}\n\n"
+        else:
+            prompt += "Summary:"
+    else:  # QA case
+        if use_context and (context is not None):
+            prompt += f"Context: {context}\n"
+        prompt += f"Question: {question}\n"
+        if answer:
+            prompt += f"Answer: {answer}\n\n"
+        else:
+            prompt += "Answer:"
+
     return prompt
-
-
-import random
 
 
 def get_data_prompt(

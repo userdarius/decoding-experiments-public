@@ -9,22 +9,24 @@ import pickle
 
 from utils import *
 from scores import *
-
 from evaluate import load
-
 
 def get_metric_for_dataset(dataset_name):
     if dataset_name == "gsm8k":
         return get_metric("gsm8k")
+    elif dataset_name == "xsum":
+        return get_metric("xsum")
     else:
         return get_metric("squad")
 
-
 def is_answerable(generation):
+    # For summarization tasks, all examples are answerable
+    if "document" in generation:
+        return True
+    
     if "reference" not in generation:
         return len(get_reference(generation)["answers"]["text"]) > 0
     return len(generation["reference"]["answers"]["text"]) > 0
-
 
 def score_pipeline(
     base_gen_model,
@@ -58,13 +60,31 @@ def score_pipeline(
             torch.cuda.empty_cache()
         it += 1
         example = dataset[index]
-        question, context = example["question"], example["context"]
-        generations[example["id"]] = {"question": question, "context": context}
-        correct_answer = example["answers"]["text"]
+        
+        # Handle both QA and summarization formats
+        if dataset_name == "xsum":
+            question = None
+            context = example["document"]
+            correct_answer = example["summary"]
+            example_id = example["id"]
+        else:
+            question = example["question"]
+            context = example["context"]
+            correct_answer = example["answers"]["text"]
+            example_id = example["id"]
+            
+        generations[example_id] = {
+            "question": question,
+            "context": context,
+            "document": context if dataset_name == "xsum" else None
+        }
+        
         if use_context:
             print("Context: ", context)
-        print("Question: ", question)
+        if question:
+            print("Question: ", question)
         print("-------------------------")
+        
         if cot:
             local_prompt = make_prompt(context, question, None, brief, True, cot=True)
         else:
@@ -83,12 +103,12 @@ def score_pipeline(
             )
             embedding = embedding.cpu() if embedding is not None else None
 
-            # Only compute accuracy if question is answerable.
-            compute_acc = True
-            if correct_answer and compute_acc:
+            # Compute accuracy based on the appropriate metric
+            if correct_answer:
                 acc = metric(predicted_answer, example, base_gen_model)
             else:
-                acc = 0.0  # pylint: disable=invalid-name
+                acc = 0.0
+                
             if i == 0:
                 accuracies.append(acc)
                 most_likely_answer_dict = {
@@ -97,30 +117,32 @@ def score_pipeline(
                     "embedding": embedding,
                     "accuracy": acc,
                 }
-                generations[example["id"]].update(
+                generations[example_id].update(
                     {
                         "most_likely_answer": most_likely_answer_dict,
                         "reference": get_reference(example),
                     }
                 )
-                # print('low-t prediction '.ljust(15) + str(i) + ' : ' + predicted_answer)
-                print("answer: ", example["answers"]["text"])
+                if dataset_name == "xsum":
+                    print("reference summary: ", correct_answer)
+                else:
+                    print("answer: ", example["answers"]["text"])
                 print("low-t predicted_answer: ", predicted_answer)
             else:
                 print(
                     "high-t prediction ".ljust(15) + str(i) + " : " + predicted_answer
                 )
-                # Aggregate predictions over num_generations.
                 full_responses.append(
                     (predicted_answer, token_log_likelihoods, embedding, acc)
                 )
 
-        # Append all predictions for this example to `generations`.
-        generations[example["id"]]["responses"] = full_responses
+        # Append all predictions for this example to `generations`
+        generations[example_id]["responses"] = full_responses
+        
         # Compute P_true
         p_true = calculate_p_true(
             base_gen_model,
-            question,
+            question if question else context,  # Use context for summarization
             most_likely_answer_dict["response"],
             [r[0] for r in full_responses],
             p_true_few_shot_prompt,
@@ -135,7 +157,7 @@ def score_pipeline(
         if is_answerable(example):
             acc = metric(most_likely_answer_dict["response"], example, None)
         else:
-            acc = 0.0  # pylint: disable=invalid-name
+            acc = 0.0
         is_true.append(acc)
         answerable.append(is_answerable(example))
         embeddings.append(most_likely_answer_dict["embedding"])
@@ -144,27 +166,30 @@ def score_pipeline(
         entropies["context_entails_response"].append(
             context_entails_response(context, responses, entailment_model)
         )
-        responses = [f"{question} {r}" for r in responses]
+        
+        # Construct responses for semantic analysis
+        if dataset_name == "xsum":
+            responses = [f"Summary: {r}" for r in responses]
+        else:
+            responses = [f"{question} {r}" for r in responses]
 
-        # Compute semantic ids.
+        # Compute semantic ids
         semantic_ids = get_semantic_ids(
             responses, model=entailment_model, strict_entailment=True, example=example
         )
 
-        # result_dict['semantic_ids'].append(semantic_ids)
-
-        # Compute entropy from frequencies of cluster assignments.
+        # Compute entropy from frequencies of cluster assignments
         entropies["cluster_assignment_entropy"].append(
             cluster_assignment_entropy(semantic_ids)
         )
 
-        # Length normalization of generation probabilities.
+        # Length normalization of generation probabilities
         log_liks_agg = [np.mean(log_lik) for log_lik in log_liks]
 
-        # Compute naive entropy.
+        # Compute naive entropy
         entropies["regular_entropy"].append(predictive_entropy(log_liks_agg))
 
-        # Compute semantic entropy.
+        # Compute semantic entropy
         log_likelihood_per_semantic_id = logsumexp_by_id(
             semantic_ids, log_liks_agg, agg="sum_normalized"
         )
@@ -179,6 +204,7 @@ def score_pipeline(
         for k, v in entropies.items():
             print(f"{k}: {v[-1]}")
         print(80 * "#")
+        
     accuracy = np.mean(accuracies)
     print(f"Average accuracy: {accuracy}")
 
@@ -197,6 +223,7 @@ def score_pipeline(
             print()
         except:
             pass
+            
     if return_indices:
         return accuracy, generations, results_dict, p_trues, indices
     return accuracies, generations, results_dict, p_trues

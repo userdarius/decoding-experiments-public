@@ -1,8 +1,16 @@
 import huggingface_hub
+import argparse
+import os
+import gc
+import torch
+import time
+
+from pipeline import score_pipeline
+from data import get_dataset
+from model import get_models
+from utils import split_dataset, get_data_prompt, get_ptrue_prompt, BRIEF_PROMPTS
 
 huggingface_hub.login(token="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")
-
-import argparse
 
 args_parser = argparse.ArgumentParser()
 # DomainConfigArguments
@@ -25,35 +33,34 @@ args_parser.add_argument("--run_base", action="store_true")
 args_parser.add_argument("--run_spec", action="store_true")
 args_parser.add_argument("--cot", action="store_true")
 
-from pipeline import score_pipeline
-from data import get_dataset
-from model import get_models
-from utils import split_dataset, get_data_prompt, get_ptrue_prompt, BRIEF_PROMPTS
-import os
-import gc
-import torch
-import time
-
-
 def main():
     args = args_parser.parse_args()
     ## Define configs
     DATASET_NAME = args.dataset
-    TARGET_MODEL_NAME = (
-        args.target_model_name
-    )  # ["meta-llama/Llama-3.2-1B", "meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.1-8B"]
+    TARGET_MODEL_NAME = args.target_model_name
     DRAFT_MODEL_NAME = args.draft_model_name
     quantize = True
-    # quantize = (TARGET_MODEL_NAME=="meta-llama/Llama-3.1-8B")
-    USE_CONTEXT = DATASET_NAME == "svamp"
-
+    
+    # Dataset-specific configurations
+    USE_CONTEXT = DATASET_NAME in ["svamp", "xsum"]  # Added xsum to context-using datasets
+    
+    # Adjust max tokens for summarization
+    if DATASET_NAME == "xsum":
+        if not args.cot:
+            args.model_max_new_tokens = 128  # Longer output for summaries
+        args.prompt_brief = "xsum"  # Use summarization-specific prompt
+    
+    # Set up save paths
     if args.cot:
         save_path_base = f"{args.save_dir}/{DATASET_NAME}-cot/results_base_TGT[{TARGET_MODEL_NAME.split('/')[-1]}]-{DATASET_NAME}.pkl"
         save_path_spec = f"{args.save_dir}/{DATASET_NAME}-cot/results_spec_TGT[{TARGET_MODEL_NAME.split('/')[-1]}]_DFT[{DRAFT_MODEL_NAME.split('/')[-1]}]-{DATASET_NAME}.pkl"
-
     else:
         save_path_base = f"{args.save_dir}/{DATASET_NAME}/results_base_TGT[{TARGET_MODEL_NAME.split('/')[-1]}]-{DATASET_NAME}.pkl"
         save_path_spec = f"{args.save_dir}/{DATASET_NAME}/results_spec_TGT[{TARGET_MODEL_NAME.split('/')[-1]}]_DFT[{DRAFT_MODEL_NAME.split('/')[-1]}]-{DATASET_NAME}.pkl"
+
+    # Ensure save directory exists
+    os.makedirs(os.path.dirname(save_path_base), exist_ok=True)
+    os.makedirs(os.path.dirname(save_path_spec), exist_ok=True)
 
     BRIEF = BRIEF_PROMPTS[args.prompt_brief]
     NUM_FEWSHOT_DATA = args.num_fewshot_data
@@ -66,26 +73,31 @@ def main():
     train_dataset, val_dataset, answerable_indices, unanswerable_indices = get_dataset(
         DATASET_NAME
     )
+    
     base_gen_model, entailment_model = get_models(
         TARGET_MODEL_NAME,
         draft_model_name=None,
         model_max_new_tokens=MODEL_MAX_NEW_TOKENS,
         quantize=quantize,
     )
+    
     if args.cot:
         prompt = ""
     else:
         prompt, prompt_indices, remaining_answerable = get_data_prompt(
-            train_dataset, answerable_indices, num_fewshot=NUM_FEWSHOT_PROMPT
+            train_dataset, answerable_indices, BRIEF, num_fewshot=NUM_FEWSHOT_PROMPT
         )
+    
     p_true_few_shot_prompt, p_true_responses, len_p_true = get_ptrue_prompt(
         base_gen_model,
         train_dataset,
         answerable_indices,
+        BRIEF,
         num_fewshot=5,
         num_generations=10,
         prompt=prompt,
     )
+
     if args.run_base:
         if os.path.exists(save_path_base):
             print(f"{save_path_base} already exists! skip evaluation.")
@@ -142,10 +154,9 @@ def main():
                 use_context=USE_CONTEXT,
             )
             toc = time.time()
-            time_base = toc - tic
-            print(f"Time for basic decoding with {TARGET_MODEL_NAME}: {time_base}")
+            time_spec = toc - tic
+            print(f"Time for speculative decoding with {TARGET_MODEL_NAME}: {time_spec}")
             print("Evaluation on speculative decoding finished.")
-
 
 if __name__ == "__main__":
     main()

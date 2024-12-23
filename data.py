@@ -147,6 +147,30 @@ def load_ds(dataset_name, seed, add_options=None, testsize=100):
 
         train_dataset = [reformat(d) for d in train_dataset]
         validation_dataset = [reformat(d) for d in validation_dataset]
+    elif dataset_name == "openai_humaneval":
+        # Load the HumanEval dataset
+        dataset = datasets.load_dataset("openai_humaneval")
+        # Since HumanEval only has a test split, we'll use it for both train and validation
+        all_samples = dataset["test"]
+
+        # Create a train/validation split
+        split_dataset = all_samples.train_test_split(test_size=testsize, seed=seed)
+        train_data = split_dataset["train"]
+        validation_data = split_dataset["test"]
+
+        def reformat_humaneval(x):
+            return {
+                "question": x["prompt"],  # The function signature and docstring
+                "context": "",  # No additional context in HumanEval
+                "answers": {"text": [x["canonical_solution"]]},  # The solution
+                "id": x["task_id"],
+                "test": x["test"],  # Keep the test cases
+                "entry_point": x["entry_point"],  # Keep the entry point
+            }
+
+        train_dataset = [reformat_humaneval(d) for d in train_data]
+        validation_dataset = [reformat_humaneval(d) for d in validation_data]
+
     else:
         raise ValueError
 
@@ -163,12 +187,8 @@ def get_dataset(dataset_name="trivia_qa", testsize=200):
         answerable_indices, unanswerable_indices = split_dataset(train_dataset)
         val_answerable, val_unanswerable = split_dataset(val_dataset)
         val_dataset = [val_dataset[i] for i in val_answerable]
-    elif dataset_name == "gsm8k":
-        # For GSM8K, all questions are considered answerable
-        answerable_indices = list(range(len(train_dataset)))
-        unanswerable_indices = []
-    elif dataset_name == "xsum":
-        # For XSum, all documents are considered answerable
+    elif dataset_name in ["gsm8k", "xsum", "openai_humaneval"]:
+        # For these datasets, all questions are considered answerable
         answerable_indices = list(range(len(train_dataset)))
         unanswerable_indices = []
     else:

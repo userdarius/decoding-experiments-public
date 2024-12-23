@@ -10,7 +10,7 @@ from data import get_dataset
 from model import get_models
 from utils import split_dataset, get_data_prompt, get_ptrue_prompt, BRIEF_PROMPTS
 
-huggingface_hub.login(token="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")
+huggingface_hub.login(token="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")
 
 args_parser = argparse.ArgumentParser()
 # DomainConfigArguments
@@ -22,7 +22,7 @@ args_parser.add_argument(
     "--draft_model_name", default="meta-llama/Llama-3.2-1B", type=str
 )
 args_parser.add_argument(
-    "--save_dir", default="/scratch/homes/sfan/uncertainty/EE724/results", type=str
+    "--save_dir", default="/scratch/homes/foodeei/uncertainty/results", type=str
 )
 args_parser.add_argument("--prompt_brief", default="default", type=str)
 args_parser.add_argument("--num_fewshot_data", default=100, type=int)

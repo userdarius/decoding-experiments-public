@@ -12,7 +12,12 @@ from scores import *
 
 from evaluate import load
 
-metric = get_metric("squad")
+
+def get_metric_for_dataset(dataset_name):
+    if dataset_name == "gsm8k":
+        return get_metric("gsm8k")
+    else:
+        return get_metric("squad")
 
 
 def is_answerable(generation):
@@ -25,6 +30,7 @@ def score_pipeline(
     base_gen_model,
     entailment_model,
     dataset,
+    dataset_name,
     num_fewshot=200,
     num_generations=10,
     brief="",
@@ -36,6 +42,8 @@ def score_pipeline(
     use_context=False,
     cot=False,
 ):
+    metric = get_metric_for_dataset(dataset_name)
+
     possible_indices = range(0, len(dataset))
     indices = random.sample(possible_indices, min(num_fewshot, len(dataset)))
 

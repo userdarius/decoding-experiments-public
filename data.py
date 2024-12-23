@@ -129,6 +129,24 @@ def load_ds(dataset_name, seed, add_options=None, testsize=100):
 
         train_dataset = [reformat(d) for d in train_dataset]
         validation_dataset = [reformat(d) for d in validation_dataset]
+
+    elif dataset_name == "xsum":
+        dataset = datasets.load_dataset("xsum")
+        train_dataset = dataset["train"]
+        validation_dataset = dataset["test"].select(list(range(testsize)))
+
+        reformat = lambda x: {
+            "document": x["document"],
+            "summary": x["summary"],
+            "id": x["id"],
+            # Adding empty fields to maintain compatibility with other datasets
+            "answers": {"text": []},
+            "context": "",
+            "question": "",
+        }
+
+        train_dataset = [reformat(d) for d in train_dataset]
+        validation_dataset = [reformat(d) for d in validation_dataset]
     else:
         raise ValueError
 
@@ -140,8 +158,21 @@ def get_dataset(dataset_name="trivia_qa", testsize=200):
     train_dataset, val_dataset = load_ds(dataset_name, 42, testsize)
     # Get indices of answerable and unanswerable questions and construct prompt.
     # only use on squad
-    answerable_indices, unanswerable_indices = split_dataset(train_dataset)
-    val_answerable, val_unanswerable = split_dataset(val_dataset)
-    val_dataset = [val_dataset[i] for i in val_answerable]
+    # Only run split_dataset for squad
+    if dataset_name == "squad":
+        answerable_indices, unanswerable_indices = split_dataset(train_dataset)
+        val_answerable, val_unanswerable = split_dataset(val_dataset)
+        val_dataset = [val_dataset[i] for i in val_answerable]
+    elif dataset_name == "gsm8k":
+        # For GSM8K, all questions are considered answerable
+        answerable_indices = list(range(len(train_dataset)))
+        unanswerable_indices = []
+    elif dataset_name == "xsum":
+        # For XSum, all documents are considered answerable
+        answerable_indices = list(range(len(train_dataset)))
+        unanswerable_indices = []
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+
     print(f"[train] {len(train_dataset)} | [val] {len(val_dataset)}")
     return train_dataset, val_dataset, answerable_indices, unanswerable_indices

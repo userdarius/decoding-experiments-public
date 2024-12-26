@@ -129,6 +129,32 @@ def load_ds(dataset_name, seed, add_options=None, testsize=100):
 
         train_dataset = [reformat(d) for d in train_dataset]
         validation_dataset = [reformat(d) for d in validation_dataset]
+
+    elif dataset_name == "humaneval":
+        dataset = datasets.load_dataset("openai_humaneval")
+        # HumanEval only has a test split
+        all_data = dataset["test"]
+
+        def reformat_humaneval(x):
+            # Combine prompt and canonical solution to create full "answer"
+            full_solution = x["prompt"] + x["canonical_solution"]
+
+            return {
+                "question": f"Write a Python function that matches this signature and description:\n{x['prompt']}",
+                "answers": {"text": [full_solution]},
+                "context": x["test"],  # Store test cases as context
+                "id": x["task_id"],
+                "entry_point": x["entry_point"],
+                "test_code": x["test"],  # Store original test code for evaluation
+            }
+
+        # Convert all examples to our format
+        formatted_data = [reformat_humaneval(d) for d in all_data]
+
+        # Split into train/validation
+        split_point = len(formatted_data) - testsize
+        train_dataset = formatted_data[:split_point]
+        validation_dataset = formatted_data[split_point : split_point + testsize]
     else:
         raise ValueError
 

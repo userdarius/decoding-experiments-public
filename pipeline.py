@@ -49,6 +49,7 @@ def score_pipeline(
     if dataset_name == "humaneval":
         logging.info("Using HumanEval metric for code evaluation")
         metric = get_metric("humaneval")
+        p_true_few_shot_prompt = ""
         base_gen_model.max_new_tokens = 512
     else:
         logging.info("Using SQuAD metric for text evaluation")

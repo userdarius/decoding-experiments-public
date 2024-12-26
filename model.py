@@ -63,7 +63,7 @@ class StoppingCriteriaSub(StoppingCriteria):
                 match = stop in generation
             elif self.match_on == "tokens":
                 # Can be dangerous due to tokenizer ambiguities.
-                match = stop in input_ids[0][-len(stop):]
+                match = stop in input_ids[0][-len(stop) :]
             else:
                 raise ValueError("Invalid match_on value")
             if match:
@@ -260,14 +260,32 @@ class HuggingfaceModel(BaseModel):
 
         # Implement prediction.
         inputs = self.tokenizer(input_data, return_tensors="pt").to("cuda")
-        
-        # Add dynamic token limit handling
+
         input_length = len(inputs["input_ids"][0])
-        available_tokens = self.token_limit - input_length - 100  # 100 token buffer
-        if available_tokens <= 0:
-            raise ValueError(f"Input too long: {input_length} tokens exceeds limit")
-        adjusted_max_tokens = min(self.max_new_tokens, available_tokens)
-        
+
+        # Adjust token limits based on model and task type
+        if "llama-2" in self.model_name.lower():
+            total_limit = 4096
+        else:
+            total_limit = 2048
+
+        # More flexible handling for different input lengths
+        if input_length > total_limit * 0.8:  # If using more than 80% of context
+            logging.warning(f"Very long input ({input_length} tokens)")
+            # Try to at least generate a minimal response
+            adjusted_max_tokens = min(100, total_limit - input_length - 50)
+            if adjusted_max_tokens <= 0:
+                raise ValueError(
+                    f"Input too long ({input_length} tokens) for context window {total_limit}"
+                )
+        else:
+            # Standard case - leave more room for generation
+            available_tokens = total_limit - input_length - 100
+            adjusted_max_tokens = min(self.max_new_tokens, available_tokens)
+
+        logging.info(
+            f"Input length: {input_length}, Adjusted max tokens: {adjusted_max_tokens}"
+        )
 
         if (
             "llama" in self.model_name.lower()

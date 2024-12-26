@@ -122,8 +122,6 @@ class HuggingfaceModel(BaseModel):
         if "llama" in model_name.lower():
             self.model_type = "llama"
             self.init_llama()
-        # elif "gpt" in model_name.lower():
-        #     self.model_type = "gpt"
         elif "falcon" in model_name.lower():
             self.model_type = "falcon"
             self.init_falcon()
@@ -132,8 +130,12 @@ class HuggingfaceModel(BaseModel):
             self.init_mistral()
         else:
             raise ValueError(f"Unknown model_type `{self.model_type}`.")
+
         if stop_sequences == "default":
-            stop_sequences = STOP_SEQUENCES
+            if max_new_tokens >= 512:  # Code task
+                stop_sequences = ["Question:", "Context:", "\n\n\n\n"]
+            else:
+                stop_sequences = STOP_SEQUENCES
         self.stop_sequences = stop_sequences + [self.tokenizer.eos_token]
         self.token_limit = 4096 if "llama" in self.model_name.lower() else 2048
 

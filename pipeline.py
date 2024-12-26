@@ -14,8 +14,6 @@ from scores import *
 from evaluate import load
 
 
-
-
 def is_code_dataset(dataset_name):
     """Check if the dataset is a code generation dataset."""
     return dataset_name in ["humaneval"]
@@ -137,17 +135,20 @@ def score_pipeline(
         # Append all predictions for this example to `generations`.
         generations[example["id"]]["responses"] = full_responses
         # Compute P_true
-        p_true = calculate_p_true(
-            base_gen_model,
-            question,
-            most_likely_answer_dict["response"],
-            [r[0] for r in full_responses],
-            p_true_few_shot_prompt,
-            hint=False,
-        )
-        p_trues.append(p_true)
-        print("log p_true: ", p_true)
-        print("p_true: ", np.exp(p_true))
+        if not is_code_task:
+            p_true = calculate_p_true(
+                base_gen_model,
+                question,
+                most_likely_answer_dict["response"],
+                [r[0] for r in full_responses],
+                p_true_few_shot_prompt,
+                hint=False,
+            )
+            p_trues.append(p_true)
+            print("log p_true: ", p_true)
+            print("p_true: ", np.exp(p_true))
+        else:
+            p_trues.append(0.0)  # Placeholder for code tasks
 
         # Compute semantic entropy
         responses = [fr[0] for fr in full_responses]

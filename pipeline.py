@@ -12,7 +12,11 @@ from scores import *
 
 from evaluate import load
 
-metric = get_metric("squad")
+
+def get_task_metric(dataset_name):
+    if dataset_name == "humaneval":
+        return get_metric("humaneval")
+    return get_metric("squad")
 
 
 def is_code_dataset(dataset_name):
@@ -44,6 +48,8 @@ def score_pipeline(
 ):
 
     is_code_task = is_code_dataset(dataset_name)
+
+    metric = get_task_metric(dataset_name)
 
     possible_indices = range(0, len(dataset))
     indices = random.sample(possible_indices, min(num_fewshot, len(dataset)))

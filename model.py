@@ -135,7 +135,7 @@ class HuggingfaceModel(BaseModel):
         if stop_sequences == "default":
             stop_sequences = STOP_SEQUENCES
         self.stop_sequences = stop_sequences + [self.tokenizer.eos_token]
-        self.token_limit = 4096 if "llama-2" in self.model_name.lower() else 2048
+        self.token_limit = 4096 if "llama" in self.model_name.lower() else 2048
 
     def init_llama(self):
         kwargs = {}
@@ -264,7 +264,7 @@ class HuggingfaceModel(BaseModel):
         input_length = len(inputs["input_ids"][0])
 
         # Adjust token limits based on model and task type
-        if "llama-2" in self.model_name.lower():
+        if "llama" in self.model_name.lower():
             total_limit = 4096
         else:
             total_limit = 2048
@@ -1710,26 +1710,29 @@ MODEL_NAMES = [
 ]
 
 
-def get_models(target_model_name, draft_model_name=None, model_max_new_tokens=20, quantize=False):
+def get_models(
+    target_model_name, draft_model_name=None, model_max_new_tokens=20, quantize=False
+):
     """Initialize and fully load models before returning them."""
     logging.info("Loading models...")
-    
+
     logging.info("Initializing Deberta entailment model...")
     entailment_model = EntailmentDeberta()
-    
-    assert target_model_name in MODEL_NAMES, f"correct your TGT[{target_model_name}] or DFT[{draft_model_name}]!"
-    
+
+    assert (
+        target_model_name in MODEL_NAMES
+    ), f"correct your TGT[{target_model_name}] or DFT[{draft_model_name}]!"
+
     if quantize:
         target_model_name = target_model_name + "-8bit"
         logging.info(f"Using 8-bit quantization for {target_model_name}")
-    
+
     # Load models with explicit CUDA synchronization
     with torch.no_grad():
         if draft_model_name is None:
             logging.info(f"Loading base model: {target_model_name}")
             base_gen_model = init_model(
-                model_name=target_model_name,
-                model_max_new_tokens=model_max_new_tokens
+                model_name=target_model_name, model_max_new_tokens=model_max_new_tokens
             )
             # Force CUDA to finish loading
             if torch.cuda.is_available():
@@ -1738,20 +1741,22 @@ def get_models(target_model_name, draft_model_name=None, model_max_new_tokens=20
             assert draft_model_name in MODEL_NAMES
             if quantize:
                 draft_model_name = draft_model_name + "-8bit"
-            logging.info(f"Loading speculative models: {target_model_name} (target) and {draft_model_name} (draft)")
+            logging.info(
+                f"Loading speculative models: {target_model_name} (target) and {draft_model_name} (draft)"
+            )
             base_gen_model = init_speculative_model(
                 target_model_name=target_model_name,
                 approx_model_name=draft_model_name,
-                model_max_new_tokens=model_max_new_tokens
+                model_max_new_tokens=model_max_new_tokens,
             )
             # Force CUDA to finish loading
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
-    
+
     logging.info("All models loaded successfully")
     if torch.cuda.is_available():
         logging.info(f"GPU Memory Usage after loading:")
         logging.info(f"  Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
         logging.info(f"  Cached: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
-    
+
     return base_gen_model, entailment_model

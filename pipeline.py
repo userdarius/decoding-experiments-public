@@ -15,6 +15,11 @@ from evaluate import load
 metric = get_metric("squad")
 
 
+def is_code_dataset(dataset_name):
+    """Check if the dataset is a code generation dataset."""
+    return dataset_name in ["humaneval"]
+
+
 def is_answerable(generation):
     if "reference" not in generation:
         return len(get_reference(generation)["answers"]["text"]) > 0
@@ -25,6 +30,7 @@ def score_pipeline(
     base_gen_model,
     entailment_model,
     dataset,
+    dataset_name="",
     num_fewshot=200,
     num_generations=10,
     brief="",
@@ -36,6 +42,9 @@ def score_pipeline(
     use_context=False,
     cot=False,
 ):
+
+    is_code_task = is_code_dataset(dataset_name)
+
     possible_indices = range(0, len(dataset))
     indices = random.sample(possible_indices, min(num_fewshot, len(dataset)))
 
@@ -65,6 +74,14 @@ def score_pipeline(
 
         full_responses = []
         num_generations = 10 + 1
+
+        if is_code_task:
+            # For code tasks, we want to include test cases in context
+            if context:
+                local_prompt += f"\nTest cases:\n{context}\n"
+            # And we want longer generation length for code
+            base_gen_model.max_new_tokens = max(base_gen_model.max_new_tokens, 512)
+
         for i in range(num_generations):
             if i == 0:
                 temperature = 0.1

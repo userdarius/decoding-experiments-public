@@ -327,12 +327,54 @@ class HuggingfaceModel(BaseModel):
                 pad_token_id=pad_token_id,
             )
 
+        # Add code validation here
+        if self.max_new_tokens >= 512:  # Code task
+            # Decode and check for complete function
+            decoded_output = self.tokenizer.decode(
+                outputs.sequences[0], skip_special_tokens=True
+            )
+            if decoded_output.strip().startswith("def "):
+                # Check for function completion
+                lines = decoded_output.split("\n")
+                func_body = False
+                complete = False
+
+                # Track indentation
+                base_indent = -1
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    indent = len(line) - len(line.lstrip())
+
+                    if line.strip().startswith("def "):
+                        base_indent = indent
+                    elif base_indent >= 0:
+                        if indent > base_indent:
+                            func_body = True
+                        elif indent == base_indent and func_body:
+                            # Found end of function
+                            complete = True
+                            # Trim any content after function
+                            decoded_output = "\n".join(lines[: lines.index(line)])
+                            break
+
+                if not func_body or not complete:
+                    logging.warning("Incomplete function generated, retrying...")
+                    return "", [], None
+
+                # Update outputs with trimmed sequence
+                new_tokens = self.tokenizer(decoded_output, return_tensors="pt")[
+                    "input_ids"
+                ].to("cuda")
+                outputs.sequences = new_tokens
+
         if len(outputs.sequences[0]) > self.token_limit:
             raise ValueError(
                 "Generation exceeding token limit %d > %d",
                 len(outputs.sequences[0]),
                 self.token_limit,
             )
+
 
         full_answer = self.tokenizer.decode(
             outputs.sequences[0], skip_special_tokens=True

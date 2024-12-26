@@ -6,6 +6,7 @@ from collections import defaultdict
 import torch.nn.functional as F
 from scipy.special import logsumexp
 import pickle
+import os
 
 from utils import *
 from scores import *
@@ -208,12 +209,14 @@ def score_pipeline(
             "entropies": entropies,
         }
         try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "wb") as f:
                 pickle.dump(results_base, f)
             print(f"Results saved at {save_path}!")
             print()
-        except:
-            pass
+        except Exception as e:
+            print(f"Failed to save results: {e}")
     if return_indices:
         return accuracy, generations, results_dict, p_trues, indices
     return accuracies, generations, results_dict, p_trues

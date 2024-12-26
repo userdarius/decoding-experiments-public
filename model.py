@@ -269,6 +269,11 @@ class HuggingfaceModel(BaseModel):
         else:
             total_limit = 2048
 
+        if self.max_new_tokens >= 512:  # Indicates code task
+            self.min_generation_tokens = 256
+        else:
+            self.min_generation_tokens = self.max_new_tokens
+
         # More flexible handling for different input lengths
         if input_length > total_limit * 0.8:  # If using more than 80% of context
             logging.warning(f"Very long input ({input_length} tokens)")

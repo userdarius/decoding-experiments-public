@@ -260,6 +260,14 @@ class HuggingfaceModel(BaseModel):
 
         # Implement prediction.
         inputs = self.tokenizer(input_data, return_tensors="pt").to("cuda")
+        
+        # Add dynamic token limit handling
+        input_length = len(inputs["input_ids"][0])
+        available_tokens = self.token_limit - input_length - 100  # 100 token buffer
+        if available_tokens <= 0:
+            raise ValueError(f"Input too long: {input_length} tokens exceeds limit")
+        adjusted_max_tokens = min(self.max_new_tokens, available_tokens)
+        
 
         if (
             "llama" in self.model_name.lower()

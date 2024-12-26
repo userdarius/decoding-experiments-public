@@ -1,6 +1,10 @@
 import huggingface_hub
+import os
 
-huggingface_hub.login(token="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")
+hf_token = os.getenv("HUGGINGFACE_TOKEN")
+if not hf_token:
+    raise ValueError("Please set the HUGGINGFACE_TOKEN environment variable")
+huggingface_hub.login(token=hf_token)
 
 import argparse
 

@@ -58,6 +58,8 @@ def main():
     if args.dataset == "humaneval":
         MODEL_MAX_NEW_TOKENS = args.code_max_new_tokens
         USE_CONTEXT = True  # Always use context for code tasks to include test cases
+    else:
+        MODEL_MAX_NEW_TOKENS = args.model_max_new_tokens
 
     if args.cot:
         save_path_base = f"{args.save_dir}/{DATASET_NAME}-cot/results_base_TGT[{TARGET_MODEL_NAME.split('/')[-1]}]-{DATASET_NAME}.pkl"
@@ -71,9 +73,8 @@ def main():
     NUM_FEWSHOT_DATA = args.num_fewshot_data
     NUM_FEWSHOT_PROMPT = args.num_fewshot_prompt
     NUM_GEN = args.num_generations
-    MODEL_MAX_NEW_TOKENS = args.model_max_new_tokens
     if args.cot:
-        MODEL_MAX_NEW_TOKENS = 100
+        MODEL_MAX_NEW_TOKENS = 512
 
     train_dataset, val_dataset, answerable_indices, unanswerable_indices = get_dataset(
         DATASET_NAME

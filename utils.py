@@ -347,9 +347,6 @@ def construct_few_shot_prompt(
     return "".join(few_shot_prompt), all_responses, it
 
 
-metric = get_metric("squad")
-
-
 def get_ptrue_prompt(
     model,
     train_dataset,
